@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /userWorkspaces/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['balance', 'initialBalance', 'holdings', 'trades', 'mode', 'updatedAt'])
+        && request.resource.data.mode == 'demo'
+        && request.resource.data.balance is number
+        && request.resource.data.initialBalance is number
+        && request.resource.data.holdings is map
+        && request.resource.data.trades is list
+        && request.resource.data.trades.size() <= 200;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
