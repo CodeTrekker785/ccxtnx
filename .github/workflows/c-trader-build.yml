@@ -1,0 +1,67 @@
+name: C Trader web and Android build
+
+on:
+  push:
+    branches: [master, main, "feature/c-trader-app"]
+    paths:
+      - "c-trader/**"
+      - ".github/workflows/c-trader-build.yml"
+  pull_request:
+    paths:
+      - "c-trader/**"
+      - ".github/workflows/c-trader-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-and-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: c-trader
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: c-trader/package.json
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install dependencies
+        run: npm install
+      - name: Build web app
+        run: npm run build
+      - name: Create Android project
+        run: npx cap add android
+      - name: Sync web assets into Android
+        run: npx cap sync android
+      - name: Build debug APK
+        working-directory: c-trader/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - name: Verify APK exists
+        working-directory: c-trader
+        run: test -s android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-trader-debug-apk
+          path: c-trader/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-trader-web-dist
+          path: c-trader/dist/
+          if-no-files-found: error
+          retention-days: 14
