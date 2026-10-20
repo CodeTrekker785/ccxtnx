@@ -56,6 +56,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - name: Validate paper engine
+        run: go build -o /tmp/c-trader-paper-engine matching-engine/src/main.go
       - name: Install backend dependencies
         working-directory: backend
         run: npm install
