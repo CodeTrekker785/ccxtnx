@@ -1,0 +1,6 @@
+{
+  "appId": "com.ctrader.app",
+  "appName": "C Trader",
+  "webDir": "../frontend-web/dist",
+  "server": { "androidScheme": "https" }
+}

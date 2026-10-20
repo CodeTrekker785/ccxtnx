@@ -1,0 +1,297 @@
+import './style.css';
+import { firebaseReady, onUserChanged, signIn, signUp, signOutUser, saveUserWorkspace, loadUserWorkspace } from './services/firebase.js';
+
+const state = {
+  mode: 'demo',
+  exchange: 'binance',
+  currency: 'usd',
+  markets: [],
+  query: '',
+  selected: 'bitcoin',
+  balance: 10000,
+  initialBalance: 10000,
+  holdings: {},
+  trades: [],
+  realTrades: [],
+  lastUpdated: null,
+  loading: true,
+  user: null,
+  authReady: false,
+};
+const symbols = {
+  bitcoin: ['BTC', 'Bitcoin', '₿'],
+  ethereum: ['ETH', 'Ethereum', '◆'],
+  solana: ['SOL', 'Solana', '◎'],
+  binancecoin: ['BNB', 'BNB', '◆'],
+  ripple: ['XRP', 'XRP', '✕'],
+  dogecoin: ['DOGE', 'Dogecoin', 'Ð'],
+  cardano: ['ADA', 'Cardano', '₳'],
+  avalanche: ['AVAX', 'Avalanche', '▲'],
+};
+const money = (n, digits = 2) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: digits, minimumFractionDigits: digits }).format(Number(n) || 0);
+const compact = n => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(Number(n) || 0);
+const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fallbackMarkets = [
+  {id:'bitcoin',symbol:'BTC',name:'Bitcoin',current_price:67240.18,price_change_percentage_24h:2.84,market_cap:1320000000000,total_volume:28000000000,sparkline_in_7d:{price:[64000,64600,64100,65500,65000,66300,67240]}},
+  {id:'ethereum',symbol:'ETH',name:'Ethereum',current_price:3528.71,price_change_percentage_24h:1.72,market_cap:423000000000,total_volume:12000000000,sparkline_in_7d:{price:[3380,3410,3390,3450,3480,3500,3528]}},
+  {id:'solana',symbol:'SOL',name:'Solana',current_price:164.92,price_change_percentage_24h:-0.83,market_cap:76000000000,total_volume:2400000000,sparkline_in_7d:{price:[171,169,167,170,165,163,164]}},
+  {id:'binancecoin',symbol:'BNB',name:'BNB',current_price:598.44,price_change_percentage_24h:0.61,market_cap:88000000000,total_volume:1200000000,sparkline_in_7d:{price:[585,590,587,594,591,596,598]}},
+  {id:'ripple',symbol:'XRP',name:'XRP',current_price:0.6128,price_change_percentage_24h:3.24,market_cap:34000000000,total_volume:980000000,sparkline_in_7d:{price:[.58,.59,.585,.60,.596,.608,.613]}},
+  {id:'dogecoin',symbol:'DOGE',name:'Dogecoin',current_price:0.1641,price_change_percentage_24h:-1.15,market_cap:23000000000,total_volume:620000000,sparkline_in_7d:{price:[.17,.168,.166,.169,.165,.163,.164]}},
+  {id:'cardano',symbol:'ADA',name:'Cardano',current_price:0.4521,price_change_percentage_24h:0.45,market_cap:16000000000,total_volume:290000000,sparkline_in_7d:{price:[.44,.445,.442,.449,.447,.45,.452]}},
+  {id:'avalanche-2',symbol:'AVAX',name:'Avalanche',current_price:36.42,price_change_percentage_24h:2.11,market_cap:14000000000,total_volume:310000000,sparkline_in_7d:{price:[34,34.5,35,34.8,35.5,36,36.42]}},
+];
+
+function appShell() {
+  document.querySelector('#app').innerHTML = `
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="C Trader home"><span class="brand-mark">C</span><span>C<span class="brand-light">Trader</span><small>CRYPTO TERMINAL</small></span></a>
+      <div class="side-label">WORKSPACE</div>
+      <button class="nav active" data-tab="markets"><span>▦</span> Markets</button>
+      <button class="nav" data-tab="portfolio"><span>◒</span> Portfolio</button>
+      <button class="nav" data-tab="orders"><span>↕</span> Trade history</button>
+      <button class="nav" data-tab="real-account"><span>◈</span> Real account</button>
+      <div class="side-label exchange-label">EXCHANGES</div>
+      <label class="exchange-select"><span class="exchange-dot"></span><select id="exchange">
+        <option value="binance">Binance</option><option value="kraken">Kraken</option><option value="coinbase">Coinbase</option><option value="okx">OKX</option><option value="bybit">Bybit</option><option value="kucoin">KuCoin</option><option value="bitget">Bitget</option><option value="gateio">Gate.io</option>
+      </select><span>⌄</span></label>
+      <div class="side-bottom"><div class="secure-icon">⌁</div><strong>Trade with care</strong><p>Crypto assets are volatile. Review every order before confirming.</p><span class="build-label">C TRADER · v1.0</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div class="mobile-brand"><span class="brand-mark">C</span> C Trader</div><div class="crumb">Workspace <span>/</span> <b id="crumb-current">Markets</b></div><div class="top-actions"><span class="connection"><i></i> <span id="connection-label">Public market data</span></span><button class="mode-toggle" id="mode-toggle"><span class="mode-dot"></span><span id="mode-label">Demo trading</span><span class="chevron">⌄</span></button><button class="avatar" id="account-button" title="Sign in or manage account">CT</button></div></header>
+      <div class="page">
+        <section class="welcome"><div><div class="eyebrow"><span class="live-pip"></span> MARKET OVERVIEW</div><h1>Trade smarter.<br/><span>See the whole market.</span></h1><p>Track crypto markets across your favorite exchanges in one workspace.</p></div><div class="welcome-art"><div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="coin coin-back">Ξ</div><div class="coin coin-front">₿</div><div class="art-spark">✦</div></div></section>
+        <section class="stats-grid">
+          <article class="stat-card"><div class="stat-head"><span>Total paper balance</span><span class="stat-icon">◈</span></div><div class="stat-value" id="balance-value">$10,000.00</div><div class="stat-foot"><span class="positive">●</span> Demo wallet · USD</div></article>
+          <article class="stat-card"><div class="stat-head"><span>Portfolio value</span><span class="stat-icon">▥</span></div><div class="stat-value" id="portfolio-value">$10,000.00</div><div class="stat-foot"><span id="portfolio-note">No assets held yet</span></div></article>
+          <article class="stat-card"><div class="stat-head"><span>Tracked markets</span><span class="stat-icon">↗</span></div><div class="stat-value" id="tracked-value">8</div><div class="stat-foot"><span class="positive">●</span> Live public prices</div></article>
+        </section>
+        <section class="panel real-account-panel" id="real-account-panel" hidden>
+          <div class="panel-head"><div><h2>Real account</h2><p>Live exchange account · separate from demo funds</p></div><span class="demo-badge" id="real-account-status">NOT CONNECTED</span></div>
+          <div class="real-account-grid">
+            <article class="real-balance-card"><span class="real-label">Verified exchange balance</span><strong id="real-balance-value">Not available</strong><p id="real-balance-note">A balance will only appear after a secure, user-specific exchange account connection is configured.</p><button class="primary-button" type="button" id="real-connect">Connect exchange</button></article>
+            <article class="real-detail-card"><span class="real-label">Account protection</span><strong>Server-side credentials only</strong><p>Never enter exchange API secret keys in this screen. The backend must verify your identity and isolate your exchange credentials.</p><div class="real-status-line"><span>Trading status</span><b id="real-trading-status">Disabled until securely configured</b></div></article>
+          </div>
+          <div class="real-actions"><button class="secondary-button" type="button" disabled title="A verified payment provider has not been configured">Deposit</button><button class="secondary-button" type="button" disabled title="A verified payment provider has not been configured">Withdraw</button><span>Deposits and withdrawals are unavailable until a real payment provider, identity checks, and server-side transaction processing are configured.</span></div>
+          <div class="real-history-head"><div><h3>Real order history</h3><p>Only orders acknowledged by the trading backend appear here.</p></div></div>
+          <div id="real-activity-list" class="activity-list"><div class="empty-state compact-empty">No confirmed real orders yet.</div></div>
+          <p class="real-disclaimer">This panel does not create funds or simulate deposits. An order submission is not proof of a final fill; verify final execution and fees with the exchange.</p>
+        </section>
+        <section class="content-grid">
+          <article class="panel markets-panel" id="markets-panel"><div class="panel-head"><div><h2>Market watch</h2><p>Popular assets · USD</p></div><label class="search-box"><span>⌕</span><input id="search" placeholder="Search assets..." autocomplete="off"/></label></div><div class="table-scroll"><table><thead><tr><th>ASSET</th><th>PRICE</th><th>24H CHANGE</th><th>MARKET CAP</th><th>7D TREND</th><th></th></tr></thead><tbody id="market-rows"><tr><td colspan="6" class="loading-cell">Loading market data…</td></tr></tbody></table></div><div class="table-footer"><span id="market-status">Connecting to public market data…</span><button class="text-button" id="refresh">↻ Refresh prices</button></div></article>
+          <article class="panel trade-panel"><div class="panel-head"><div><h2>Quick trade</h2><p id="trade-subtitle">Practice with virtual funds</p></div><span class="demo-badge" id="trade-badge">DEMO</span></div><div class="asset-picker"><div class="asset-icon" id="trade-asset-icon">₿</div><div class="asset-name"><strong id="trade-asset-name">Bitcoin</strong><small id="trade-asset-symbol">BTC / USD</small></div><div class="asset-price"><strong id="trade-asset-price">$67,240.18</strong><small id="trade-asset-change">+2.84%</small></div></div><div class="side-switch"><button class="side-btn buy selected" data-side="buy">Buy</button><button class="side-btn sell" data-side="sell">Sell</button></div><label class="field-label">Order amount (USD)</label><div class="amount-input"><span>$</span><input id="amount" type="number" min="1" step="1" value="100" inputmode="decimal"/><button id="max-amount">MAX</button></div><div class="trade-details"><div><span>Estimated quantity</span><b id="estimated-qty">0.001487 BTC</b></div><div><span>Order type</span><b>Market</b></div><div><span>Exchange</span><b id="trade-exchange">Binance</b></div><div><span>Estimated fee (0.1%)</span><b id="fee-value">$0.10</b></div></div><button class="primary-trade" id="submit-trade">Buy BTC <span>→</span></button><p class="risk-note"><span>ⓘ</span><span id="risk-copy">Demo mode uses virtual funds. No real order is sent.</span></p><div class="trade-error" id="trade-error" role="status"></div></article>
+        </section>
+        <section class="bottom-grid"><article class="panel holdings-panel"><div class="panel-head"><div><h2>Your holdings</h2><p>Assets in your current wallet</p></div><button class="text-button" data-tab="portfolio">View portfolio →</button></div><div id="holdings-list" class="holdings-list"><div class="empty-state"><span>◒</span><b>Your portfolio starts here</b><p>Place a demo trade to see your assets appear.</p></div></div></article><article class="panel activity-panel"><div class="panel-head"><div><h2>Recent activity</h2><p>Your latest orders</p></div><button class="text-button" data-tab="orders">View all →</button></div><div id="activity-list" class="activity-list"><div class="empty-state compact-empty">No trades yet</div></div></article></section>
+        <footer><span>© 2026 C Trader</span><span>Market prices are informational only · Not financial advice</span><span class="footer-status"><i></i> <span id="updated-time">Initializing</span></span></footer>
+      </div>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+    <dialog id="auth-dialog"><form method="dialog" class="dialog-card" id="auth-form"><button class="dialog-close" value="cancel" aria-label="Close">×</button><div class="dialog-icon">◉</div><div class="eyebrow">C TRADER ACCOUNT</div><h2 id="auth-title">Sign in</h2><p id="auth-copy">Sign in to sync your demo portfolio and trade history across devices.</p><label class="field-label" for="auth-email">Email</label><input id="auth-email" class="dialog-input" type="email" autocomplete="email" required placeholder="you@example.com"/><label class="field-label" for="auth-password">Password</label><input id="auth-password" class="dialog-input" type="password" autocomplete="current-password" minlength="6" required placeholder="At least 6 characters"/><div class="dialog-actions"><button class="secondary-button" type="button" id="auth-switch">Create account</button><button class="primary-button" id="auth-submit" value="submit">Sign in</button></div><button class="text-button" type="button" id="auth-signout" hidden>Sign out</button><p class="dialog-hint" id="auth-status">Firebase configuration is required. Authentication is unavailable until configured.</p></form></dialog>
+    <dialog id="live-dialog"><form method="dialog" class="dialog-card"><button class="dialog-close" value="cancel" aria-label="Close">×</button><div class="dialog-icon">⌁</div><div class="eyebrow">LIVE TRADING</div><h2>Connect your secure backend</h2><p>Real orders require a separately deployed C Trader API server, exchange API credentials stored on that server, and a private access token. Never paste exchange secret keys into this app.</p><label class="field-label" for="api-url">Backend URL</label><input id="api-url" class="dialog-input" type="url" placeholder="https://your-api.example.com" autocomplete="url"/><label class="field-label" for="api-token">Backend access token</label><input id="api-token" class="dialog-input" type="password" placeholder="Session-only token" autocomplete="off"/><div class="dialog-actions"><button class="secondary-button" value="cancel">Cancel</button><button class="primary-button" id="connect-live" value="connect">Test connection</button></div><p class="dialog-hint">Token remains in memory for this session only. Configure C_TRADER_ACCESS_TOKEN and exchange credentials on the backend.</p></form></dialog>
+  `;
+}
+
+function getMarket(id) { return state.markets.find(m => m.id === id) || state.markets[0] || fallbackMarkets[0]; }
+function iconFor(m) { return symbols[m.id]?.[2] || (m.symbol || '?').slice(0,1).toUpperCase(); }
+function price(n) { if (n < 0.01) return '$' + n.toFixed(6); if (n < 1) return '$' + n.toFixed(4); return money(n); }
+function sparkline(values, change) {
+  const arr = (values || []).slice(-18); if (arr.length < 2) return '<span class="spark-empty">—</span>';
+  const min = Math.min(...arr), max = Math.max(...arr), span = max-min || 1;
+  const pts = arr.map((v,i)=>`${(i/(arr.length-1))*100},${26-((v-min)/span)*23}`).join(' ');
+  return `<svg class="spark ${change >= 0 ? 'up' : 'down'}" viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="7 day trend"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function filteredMarkets() { return state.markets.filter(m => `${m.name} ${m.symbol}`.toLowerCase().includes(state.query.toLowerCase())); }
+function renderMarkets() {
+  const rows = filteredMarkets().map(m => {
+    const change = Number(m.price_change_percentage_24h || 0), selected = m.id === state.selected;
+    return `<tr class="${selected ? 'selected-row' : ''}" data-asset="${escapeHtml(m.id)}"><td><div class="market-asset"><span class="asset-mini">${escapeHtml(iconFor(m))}</span><span><b>${escapeHtml(m.name)}</b><small>${escapeHtml(m.symbol.toUpperCase())}</small></span></div></td><td class="price-cell">${price(Number(m.current_price))}</td><td><span class="change-pill ${change >= 0 ? 'positive-bg' : 'negative-bg'}">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</span></td><td class="muted-cell">${money(Number(m.market_cap || 0),0)}</td><td>${sparkline(m.sparkline_in_7d?.price, change)}</td><td><button class="trade-row-btn" data-trade-asset="${escapeHtml(m.id)}">Trade</button></td></tr>`;
+  }).join('');
+  document.querySelector('#market-rows').innerHTML = rows || '<tr><td colspan="6" class="loading-cell">No matching assets found.</td></tr>';
+  document.querySelector('#tracked-value').textContent = state.markets.length;
+  document.querySelector('#market-status').textContent = state.lastUpdated ? `Updated ${state.lastUpdated.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · Public prices` : 'Showing fallback sample prices';
+}
+function renderTrade() {
+  const m = getMarket(state.selected), sym = m.symbol.toUpperCase(), change = Number(m.price_change_percentage_24h || 0);
+  document.querySelector('#trade-asset-icon').textContent = iconFor(m);
+  document.querySelector('#trade-asset-name').textContent = m.name;
+  document.querySelector('#trade-asset-symbol').textContent = `${sym} / USD`;
+  document.querySelector('#trade-asset-price').textContent = price(Number(m.current_price));
+  document.querySelector('#trade-asset-change').textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+  document.querySelector('#trade-asset-change').className = change >= 0 ? 'positive-text' : 'negative-text';
+  document.querySelector('#trade-exchange').textContent = exchangeName();
+  document.querySelector('#trade-badge').textContent = state.mode === 'demo' ? 'DEMO' : 'LIVE';
+  document.querySelector('#trade-badge').className = state.mode === 'demo' ? 'demo-badge' : 'live-badge';
+  document.querySelector('#trade-subtitle').textContent = state.mode === 'demo' ? 'Practice with virtual funds' : 'Protected exchange connection';
+  document.querySelector('#risk-copy').textContent = state.mode === 'demo' ? 'Demo mode uses virtual funds. No real order is sent.' : 'Live orders can move real funds. Confirm the exchange and amount carefully.';
+  document.querySelector('#submit-trade').innerHTML = `${document.querySelector('.side-btn.selected')?.dataset.side === 'sell' ? 'Sell' : 'Buy'} ${sym} <span>→</span>`;
+  updateEstimate();
+}
+function exchangeName() { return ({binance:'Binance',kraken:'Kraken',coinbase:'Coinbase',okx:'OKX',bybit:'Bybit',kucoin:'KuCoin',bitget:'Bitget',gateio:'Gate.io'})[state.exchange] || state.exchange; }
+function updateEstimate() {
+  const m = getMarket(state.selected), amount = Math.max(0, Number(document.querySelector('#amount')?.value || 0)), side = document.querySelector('.side-btn.selected')?.dataset.side || 'buy';
+  document.querySelector('#estimated-qty').textContent = `${(amount / Number(m.current_price || 1)).toLocaleString('en-US',{maximumSignificantDigits:7})} ${m.symbol.toUpperCase()}`;
+  document.querySelector('#fee-value').textContent = money(amount * .001);
+  document.querySelector('#submit-trade').innerHTML = `${side === 'sell' ? 'Sell' : 'Buy'} ${m.symbol.toUpperCase()} <span>→</span>`;
+}
+function portfolioValue() { return Object.entries(state.holdings).reduce((sum,[id,qty])=>sum + qty * Number(getMarket(id).current_price || 0), 0); }
+function renderPortfolio() {
+  const total = portfolioValue();
+  document.querySelector('#balance-value').textContent = money(state.balance);
+  document.querySelector('#portfolio-value').textContent = money(state.balance + total);
+  document.querySelector('#portfolio-note').textContent = total ? `${money(total)} in crypto assets` : 'No assets held yet';
+  const entries = Object.entries(state.holdings).filter(([,q])=>q > 0.00000001);
+  document.querySelector('#holdings-list').innerHTML = entries.length ? entries.map(([id,qty])=>{const m=getMarket(id),value=qty*Number(m.current_price||0);return `<div class="holding-row"><span class="asset-mini">${escapeHtml(iconFor(m))}</span><div class="holding-title"><b>${escapeHtml(m.name)}</b><small>${qty.toLocaleString('en-US',{maximumSignificantDigits:8})} ${m.symbol.toUpperCase()}</small></div><div class="holding-value"><b>${money(value)}</b><small>${((value/Math.max(total,1))*100).toFixed(1)}% of holdings</small></div></div>`}).join('') : '<div class="empty-state"><span>◒</span><b>Your portfolio starts here</b><p>Place a demo trade to see your assets appear.</p></div>';
+  const activity = state.trades.slice(0,4);
+  document.querySelector('#activity-list').innerHTML = activity.length ? activity.map(t=>`<div class="activity-row"><span class="activity-icon ${t.side}">${t.side==='buy'?'↙':'↗'}</span><div class="activity-title"><b>${t.side==='buy'?'Bought':'Sold'} ${t.symbol}</b><small>${t.time}</small></div><div class="activity-value"><b>${money(t.amount)}</b><small class="${t.side==='buy'?'positive-text':'negative-text'}">${t.side.toUpperCase()}</small></div></div>`).join('') : '<div class="empty-state compact-empty">No trades yet</div>';
+}
+function renderRealAccount() {
+  const connected=Boolean(window.__cTraderLive?.url);
+  const badge=document.querySelector('#real-account-status');
+  badge.textContent=connected?'BACKEND CONNECTED':'NOT CONNECTED';
+  badge.className=connected?'live-badge':'demo-badge';
+  document.querySelector('#real-balance-value').textContent='Not available';
+  document.querySelector('#real-balance-note').textContent=connected
+    ? 'The current API confirms connectivity but does not provide a verified balance for your individual exchange account.'
+    : 'Connect the API to begin setup. A verified balance requires a user-specific exchange connection.';
+  document.querySelector('#real-trading-status').textContent=connected?'Order API connected; balance verification unavailable':'Disabled until securely configured';
+  const list=document.querySelector('#real-activity-list');
+  list.innerHTML=state.realTrades.length?state.realTrades.slice(0,20).map(t=>'<div class="activity-row"><span class="activity-icon '+(t.side==='buy'?'buy':'sell')+'">'+(t.side==='buy'?'↙':'↗')+'</span><div class="activity-title"><b>'+(t.side==='buy'?'Buy':'Sell')+' '+escapeHtml(t.symbol)+'</b><small>Order '+escapeHtml(t.id)+' · '+escapeHtml(t.time)+'</small></div><div class="activity-value"><b>'+money(t.amount)+'</b><small>'+escapeHtml(String(t.status).toUpperCase())+'</small></div></div>').join(''):'<div class="empty-state compact-empty">No confirmed real orders yet.</div>';
+}
+function showToast(message) { const el=document.querySelector('#toast'); el.textContent=message; el.classList.add('visible'); setTimeout(()=>el.classList.remove('visible'),3000); }
+async function loadMarkets() {
+  try {
+    const response = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum,solana,binancecoin,ripple,dogecoin,cardano,avalanche-2&order=market_cap_desc&per_page=8&page=1&sparkline=true&price_change_percentage=24h', {headers:{accept:'application/json'}});
+    if (!response.ok) throw new Error('Market feed unavailable');
+    const data = await response.json();
+    if (Array.isArray(data) && data.length) state.markets = data;
+  } catch (e) {
+    if (!state.markets.length) state.markets = fallbackMarkets;
+    document.querySelector('#connection-label').textContent = 'Sample data / feed offline';
+  }
+  state.loading = false; state.lastUpdated = new Date();
+  if (!state.markets.some(m=>m.id===state.selected)) state.selected = state.markets[0].id;
+  renderMarkets(); renderTrade(); renderPortfolio();
+  document.querySelector('#updated-time').textContent = 'Updated ' + state.lastUpdated.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+}
+function paperTrade() {
+  const m=getMarket(state.selected), side=document.querySelector('.side-btn.selected')?.dataset.side || 'buy', amount=Number(document.querySelector('#amount').value), fee=amount*.001, priceNow=Number(m.current_price);
+  const error=document.querySelector('#trade-error'); error.textContent='';
+  if (!Number.isFinite(amount)||amount<=0) {error.textContent='Enter a valid amount greater than zero.';return;}
+  const qty=amount/priceNow;
+  if (side==='buy') {
+    if (amount+fee>state.balance) {error.textContent='Insufficient demo USD balance for this order.';return;}
+    state.balance-=amount+fee; state.holdings[m.id]=(state.holdings[m.id]||0)+qty;
+  } else {
+    if ((state.holdings[m.id]||0)<qty) {error.textContent='Not enough of this asset in your demo wallet to sell that USD value.';return;}
+    state.holdings[m.id]-=qty; state.balance+=amount-fee;
+  }
+  state.trades.unshift({side,symbol:m.symbol.toUpperCase(),amount,time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});
+  renderPortfolio(); renderTrade(); if(state.user) syncWorkspaceToCloud().catch(()=>showToast('Trade saved locally; cloud sync failed.')); showToast(`Demo ${side} order complete · ${qty.toLocaleString('en-US',{maximumSignificantDigits:6})} ${m.symbol.toUpperCase()}`);
+}
+function switchTab(tab) {
+  const realAccount = tab === 'real-account';
+  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  document.querySelector('#crumb-current').textContent=({markets:'Markets',portfolio:'Portfolio',orders:'Trade history','real-account':'Real account'})[tab]||'Markets';
+  ['.welcome','.stats-grid','.content-grid','.bottom-grid'].forEach(selector=>{const el=document.querySelector(selector);if(el)el.hidden=realAccount;});
+  document.querySelector('#real-account-panel').hidden=!realAccount;
+  if(realAccount){renderRealAccount();document.querySelector('#real-account-panel').scrollIntoView({behavior:'smooth',block:'start'});return;}
+  if(tab==='portfolio') document.querySelector('#holdings-list').scrollIntoView({behavior:'smooth',block:'center'});
+  if(tab==='orders') document.querySelector('#activity-list').scrollIntoView({behavior:'smooth',block:'center'});
+  if(tab==='markets') document.querySelector('#markets-panel').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function bindEvents() {
+  document.addEventListener('click', e=>{
+    const nav=e.target.closest('[data-tab]'); if(nav){switchTab(nav.dataset.tab);return;}
+    const trade=e.target.closest('[data-trade-asset]'); if(trade){state.selected=trade.dataset.tradeAsset;renderMarkets();renderTrade();document.querySelector('.trade-panel').scrollIntoView({behavior:'smooth',block:'center'});return;}
+    const row=e.target.closest('tr[data-asset]'); if(row){state.selected=row.dataset.asset;renderMarkets();renderTrade();}
+    const side=e.target.closest('[data-side]'); if(side){document.querySelectorAll('.side-btn').forEach(b=>b.classList.toggle('selected',b===side));renderTrade();}
+  });
+  document.querySelector('#account-button').addEventListener('click',()=>{updateAuthDialog();document.querySelector('#auth-dialog').showModal();});
+  document.querySelector('#real-connect').addEventListener('click',()=>{document.querySelector('#live-dialog').showModal();});
+  document.querySelector('#auth-switch').addEventListener('click',()=>{authMode=authMode==='signin'?'signup':'signin';updateAuthDialog();});
+  document.querySelector('#auth-form').addEventListener('submit',async e=>{
+    if(e.submitter?.id!=='auth-submit')return;
+    e.preventDefault();
+    if(!firebaseReady){document.querySelector('#auth-status').textContent='Add Firebase web configuration to frontend-web/.env (see .env.example) and rebuild.';return;}
+    const email=document.querySelector('#auth-email').value.trim(), password=document.querySelector('#auth-password').value;
+    const button=document.querySelector('#auth-submit');button.disabled=true;
+    try{
+      const user=authMode==='signup'?await signUp(email,password):await signIn(email,password);
+      state.user={uid:user.uid,email:user.email}; await syncWorkspaceToCloud(); document.querySelector('#auth-dialog').close();showToast('Signed in. Demo workspace sync enabled.');
+    }catch(err){document.querySelector('#auth-status').textContent=authMessage(err);}
+    finally{button.disabled=false;}
+  });
+  document.querySelector('#search').addEventListener('input',e=>{state.query=e.target.value;renderMarkets();});
+  document.querySelector('#amount').addEventListener('input',updateEstimate);
+  document.querySelector('#exchange').addEventListener('change',e=>{state.exchange=e.target.value;document.querySelector('#trade-exchange').textContent=exchangeName();showToast(`Selected ${exchangeName()} connector`);});
+  document.querySelector('#refresh').addEventListener('click',loadMarkets);
+  document.querySelector('#submit-trade').addEventListener('click',()=>state.mode==='demo'?paperTrade():liveTrade());
+  document.querySelector('#max-amount').addEventListener('click',()=>{document.querySelector('#amount').value=Math.max(0,Math.floor(state.balance));updateEstimate();});
+  document.querySelector('#mode-toggle').addEventListener('click',()=>{if(state.mode==='demo'){document.querySelector('#live-dialog').showModal();}else{state.mode='demo';document.querySelector('#mode-label').textContent='Demo trading';renderTrade();showToast('Switched to demo trading.');}});
+  document.querySelector('#connect-live').addEventListener('click',async e=>{
+    e.preventDefault(); const url=document.querySelector('#api-url').value.trim().replace(/\/$/,''); const token=document.querySelector('#api-token').value.trim();
+    if(!url||!token){showToast('Enter the backend URL and access token.');return;}
+    try {const r=await fetch(url+'/api/health',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new Error('Connection rejected');const data=await r.json();if(!data.ok)throw new Error('Backend not ready');if(!data.liveTrading)throw new Error('Live trading is disabled or not securely configured on this backend');window.__cTraderLive={url,token};state.mode='live';refreshSelectedExchangeTicker();document.querySelector('#live-dialog').close();document.querySelector('#mode-label').textContent='Live trading';document.querySelector('#connection-label').textContent='Backend connected';renderTrade();showToast('Backend connected. Review live orders carefully.');}
+    catch(err){showToast('Could not verify backend. Check URL, token and CORS.');}
+  });
+}
+async function refreshSelectedExchangeTicker() {
+  const connection = window.__cTraderLive;
+  if (!connection?.url) return;
+  const market = getMarket(state.selected);
+  if (!market?.symbol) return;
+  const pair = `${market.symbol.toUpperCase()}-USDT`;
+  try {
+    const response = await fetch(`${connection.url}/api/markets/${encodeURIComponent(state.exchange)}/${encodeURIComponent(pair)}/ticker`, {headers:{accept:'application/json'}});
+    if (!response.ok) return;
+    const ticker = await response.json();
+    if (!Number.isFinite(Number(ticker.last)) || Number(ticker.last) <= 0) return;
+    market.current_price = Number(ticker.last);
+    if (Number.isFinite(Number(ticker.percentage))) market.price_change_percentage_24h = Number(ticker.percentage);
+    state.lastUpdated = new Date();
+    renderMarkets(); renderTrade(); renderPortfolio();
+    document.querySelector('#connection-label').textContent = `${exchangeName()} live ticker`;
+    document.querySelector('#updated-time').textContent = 'Exchange tick ' + state.lastUpdated.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } catch { /* Keep the last good quote; the next poll will retry. */ }
+}
+async function liveTrade() {
+  const m=getMarket(state.selected),side=document.querySelector('.side-btn.selected')?.dataset.side||'buy',amount=Number(document.querySelector('#amount').value);
+  if(!window.__cTraderLive){document.querySelector('#live-dialog').showModal();return;}
+  if(!Number.isFinite(amount)||amount<=0){document.querySelector('#trade-error').textContent='Enter a valid order amount.';return;}
+  if(!confirm(`Send REAL ${side.toUpperCase()} market order on ${exchangeName()} for approximately ${money(amount)} of ${m.symbol.toUpperCase()}? Crypto orders may lose money.`))return;
+  try {
+    const r=await fetch(window.__cTraderLive.url+'/api/order',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+window.__cTraderLive.token},body:JSON.stringify({exchange:state.exchange,symbol:m.symbol.toUpperCase()+'/USDT',side,amount})});
+    const data=await r.json();if(!r.ok)throw new Error(data.error||'Order rejected');
+    const order=data.order||{};
+    state.realTrades.unshift({id:order.id||'unassigned',side:order.side||side,symbol:(order.symbol||m.symbol.toUpperCase()+'/USDT').replace('/USDT',''),amount:Number(order.requestedUsd)||amount,status:order.status||'submitted',filled:order.filled,time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});
+    renderRealAccount();showToast('Backend acknowledged the live order. Verify final fill and fees at the exchange.');
+  } catch(err){document.querySelector('#trade-error').textContent='Live order failed: '+err.message;}
+}
+let authMode='signin';
+function updateAuthDialog(){
+  const signed=Boolean(state.user);
+  document.querySelector('#auth-title').textContent=signed?'Your account':authMode==='signup'?'Create account':'Sign in';
+  document.querySelector('#auth-copy').textContent=signed?state.user.email:'Sign in to sync your demo portfolio and trade history across devices.';
+  document.querySelector('#auth-submit').textContent=authMode==='signup'?'Create account':'Sign in';
+  document.querySelector('#auth-switch').textContent=authMode==='signup'?'I already have an account':'Create account';
+  document.querySelector('#auth-signout').hidden=!signed;
+  document.querySelector('#auth-email').hidden=signed;
+  document.querySelector('#auth-password').hidden=signed;
+  document.querySelector('#auth-submit').hidden=signed;
+  document.querySelector('#auth-switch').hidden=signed;
+  document.querySelector('#auth-status').textContent=!firebaseReady?'Firebase configuration is required. See frontend-web/.env.example.':signed?'Your demo workspace syncs to your Firebase account.':'Firebase Authentication is ready.';
+}
+function authMessage(err){return ({'auth/invalid-credential':'Email or password is incorrect.','auth/email-already-in-use':'An account with this email already exists.','auth/weak-password':'Choose a password with at least 6 characters.','auth/invalid-email':'Enter a valid email address.','auth/too-many-requests':'Too many attempts. Try again later.'})[err.code]||err.message||'Authentication failed.';}
+async function syncWorkspaceToCloud(){
+  if(!state.user)return;
+  await saveUserWorkspace(state.user.uid,{balance:state.balance,initialBalance:state.initialBalance,holdings:state.holdings,trades:state.trades,mode:'demo',updatedAt:new Date().toISOString()});
+}
+appShell(); bindEvents(); state.markets=fallbackMarkets; renderMarkets(); renderTrade(); renderPortfolio(); loadMarkets(); setInterval(loadMarkets,60000); setInterval(refreshSelectedExchangeTicker,10000);
+onUserChanged(async user=>{
+  state.user=user?{uid:user.uid,email:user.email}:null;
+  document.querySelector('#account-button').textContent=user?(user.email||'CT').slice(0,2).toUpperCase():'CT';
+  updateAuthDialog();
+  if(user){try{const data=await loadUserWorkspace(user.uid);if(data){state.balance=Number(data.balance)||state.balance;state.initialBalance=Number(data.initialBalance)||state.initialBalance;state.holdings=data.holdings&&typeof data.holdings==='object'?data.holdings:{};state.trades=Array.isArray(data.trades)?data.trades:[];renderPortfolio();renderTrade();}}catch{showToast('Could not sync workspace. Check Firestore security rules.');}}
+});
+document.querySelector('#auth-signout').addEventListener('click',async()=>{await signOutUser();state.user=null;updateAuthDialog();document.querySelector('#auth-dialog').close();showToast('Signed out.');});
+
