@@ -93,12 +93,15 @@ jobs:
               raise SystemExit("Expected Capacitor-generated Groovy Gradle files were not found")
 
           root_text = root.read_text()
-          # Firebase Auth 25.x requires Android API 24 or newer; Capacitor defaults to 23.
-          root_text, sdk_changes = re.subn(r"(?m)(minSdkVersion\s*=\s*)23\b", r"\g<1>24", root_text)
-          if sdk_changes == 0:
-              root_text, sdk_changes = re.subn(r"(?m)(minSdkVersion\s+)23\b", r"\g<1>24", root_text)
-          if sdk_changes == 0 and not re.search(r"(?m)minSdkVersion\s*=\s*(?:24|[2-9][5-9]|[3-9]\d)", root_text):
-              raise SystemExit("Could not safely raise Android minSdkVersion to 24 for Firebase Auth")
+          # Capacitor defines minSdkVersion in variables.gradle, not root build.gradle.
+          variables = Path("variables.gradle")
+          if not variables.exists():
+              raise SystemExit("Capacitor variables.gradle not found; cannot configure Firebase Auth safely")
+          variables_text = variables.read_text()
+          variables_text, sdk_changes = re.subn(r"(?m)(minSdkVersion\s*=\s*)23\b", r"\g<1>24", variables_text)
+          if sdk_changes == 0 and not re.search(r"(?m)minSdkVersion\s*=\s*(?:24|2[5-9]|[3-9]\d|[1-9]\d\d+)", variables_text):
+              raise SystemExit("Could not set Android minSdkVersion to 24 in variables.gradle")
+          variables.write_text(variables_text)
           plugin_line = "id 'com.google.gms.google-services' version '4.5.0' apply false"
           if "com.google.gms.google-services" not in root_text:
               if re.search(r"(?m)^plugins\s*\{", root_text):
