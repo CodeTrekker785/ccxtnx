@@ -182,9 +182,28 @@ function bindEvents() {
   document.querySelector('#connect-live').addEventListener('click',async e=>{
     e.preventDefault(); const url=document.querySelector('#api-url').value.trim().replace(/\/$/,''); const token=document.querySelector('#api-token').value.trim();
     if(!url||!token){showToast('Enter the backend URL and access token.');return;}
-    try {const r=await fetch(url+'/api/health',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new Error('Connection rejected');const data=await r.json();if(!data.ok)throw new Error('Backend not ready');if(!data.liveTrading)throw new Error('Live trading is disabled or not securely configured on this backend');window.__cTraderLive={url,token};state.mode='live';document.querySelector('#live-dialog').close();document.querySelector('#mode-label').textContent='Live trading';document.querySelector('#connection-label').textContent='Backend connected';renderTrade();showToast('Backend connected. Review live orders carefully.');}
+    try {const r=await fetch(url+'/api/health',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new Error('Connection rejected');const data=await r.json();if(!data.ok)throw new Error('Backend not ready');if(!data.liveTrading)throw new Error('Live trading is disabled or not securely configured on this backend');window.__cTraderLive={url,token};state.mode='live';refreshSelectedExchangeTicker();document.querySelector('#live-dialog').close();document.querySelector('#mode-label').textContent='Live trading';document.querySelector('#connection-label').textContent='Backend connected';renderTrade();showToast('Backend connected. Review live orders carefully.');}
     catch(err){showToast('Could not verify backend. Check URL, token and CORS.');}
   });
+}
+async function refreshSelectedExchangeTicker() {
+  const connection = window.__cTraderLive;
+  if (!connection?.url) return;
+  const market = getMarket(state.selected);
+  if (!market?.symbol) return;
+  const pair = `${market.symbol.toUpperCase()}-USDT`;
+  try {
+    const response = await fetch(`${connection.url}/api/markets/${encodeURIComponent(state.exchange)}/${encodeURIComponent(pair)}/ticker`, {headers:{accept:'application/json'}});
+    if (!response.ok) return;
+    const ticker = await response.json();
+    if (!Number.isFinite(Number(ticker.last)) || Number(ticker.last) <= 0) return;
+    market.current_price = Number(ticker.last);
+    if (Number.isFinite(Number(ticker.percentage))) market.price_change_percentage_24h = Number(ticker.percentage);
+    state.lastUpdated = new Date();
+    renderMarkets(); renderTrade(); renderPortfolio();
+    document.querySelector('#connection-label').textContent = `${exchangeName()} live ticker`;
+    document.querySelector('#updated-time').textContent = 'Exchange tick ' + state.lastUpdated.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } catch { /* Keep the last good quote; the next poll will retry. */ }
 }
 async function liveTrade() {
   const m=getMarket(state.selected),side=document.querySelector('.side-btn.selected')?.dataset.side||'buy',amount=Number(document.querySelector('#amount').value);
@@ -197,4 +216,4 @@ async function liveTrade() {
     state.trades.unshift({side,symbol:m.symbol.toUpperCase(),amount,time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});renderPortfolio();showToast('Live order submitted. Check your exchange for final status.');
   } catch(err){document.querySelector('#trade-error').textContent='Live order failed: '+err.message;}
 }
-appShell(); bindEvents(); state.markets=fallbackMarkets; renderMarkets(); renderTrade(); renderPortfolio(); loadMarkets(); setInterval(loadMarkets,60000);
+appShell(); bindEvents(); state.markets=fallbackMarkets; renderMarkets(); renderTrade(); renderPortfolio(); loadMarkets(); setInterval(loadMarkets,60000); setInterval(refreshSelectedExchangeTicker,10000);
