@@ -14,3 +14,33 @@ services:
     entrypoint: /bin/bash
     stdin_open: true
     tty: true
+
+  c-trader-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      PORT: 8787
+      C_TRADER_ALLOWED_ORIGINS: ${C_TRADER_ALLOWED_ORIGINS:-http://localhost:8080}
+    ports:
+      - "8787:8787"
+    restart: unless-stopped
+
+  c-trader-web:
+    build:
+      context: .
+      dockerfile: frontend-web/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - c-trader-backend
+    restart: unless-stopped
+
+  c-trader-paper-engine:
+    build:
+      context: .
+      dockerfile: matching-engine/Dockerfile
+    profiles: ["paper-engine"]
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
