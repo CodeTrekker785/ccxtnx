@@ -12,6 +12,7 @@ const state = {
   initialBalance: 10000,
   holdings: {},
   trades: [],
+  realTrades: [],
   lastUpdated: null,
   loading: true,
   user: null,
@@ -49,6 +50,7 @@ function appShell() {
       <button class="nav active" data-tab="markets"><span>▦</span> Markets</button>
       <button class="nav" data-tab="portfolio"><span>◒</span> Portfolio</button>
       <button class="nav" data-tab="orders"><span>↕</span> Trade history</button>
+      <button class="nav" data-tab="real-account"><span>◈</span> Real account</button>
       <div class="side-label exchange-label">EXCHANGES</div>
       <label class="exchange-select"><span class="exchange-dot"></span><select id="exchange">
         <option value="binance">Binance</option><option value="kraken">Kraken</option><option value="coinbase">Coinbase</option><option value="okx">OKX</option><option value="bybit">Bybit</option><option value="kucoin">KuCoin</option><option value="bitget">Bitget</option><option value="gateio">Gate.io</option>
@@ -63,6 +65,17 @@ function appShell() {
           <article class="stat-card"><div class="stat-head"><span>Total paper balance</span><span class="stat-icon">◈</span></div><div class="stat-value" id="balance-value">$10,000.00</div><div class="stat-foot"><span class="positive">●</span> Demo wallet · USD</div></article>
           <article class="stat-card"><div class="stat-head"><span>Portfolio value</span><span class="stat-icon">▥</span></div><div class="stat-value" id="portfolio-value">$10,000.00</div><div class="stat-foot"><span id="portfolio-note">No assets held yet</span></div></article>
           <article class="stat-card"><div class="stat-head"><span>Tracked markets</span><span class="stat-icon">↗</span></div><div class="stat-value" id="tracked-value">8</div><div class="stat-foot"><span class="positive">●</span> Live public prices</div></article>
+        </section>
+        <section class="panel real-account-panel" id="real-account-panel" hidden>
+          <div class="panel-head"><div><h2>Real account</h2><p>Live exchange account · separate from demo funds</p></div><span class="demo-badge" id="real-account-status">NOT CONNECTED</span></div>
+          <div class="real-account-grid">
+            <article class="real-balance-card"><span class="real-label">Verified exchange balance</span><strong id="real-balance-value">Not available</strong><p id="real-balance-note">A balance will only appear after a secure, user-specific exchange account connection is configured.</p><button class="primary-button" type="button" id="real-connect">Connect exchange</button></article>
+            <article class="real-detail-card"><span class="real-label">Account protection</span><strong>Server-side credentials only</strong><p>Never enter exchange API secret keys in this screen. The backend must verify your identity and isolate your exchange credentials.</p><div class="real-status-line"><span>Trading status</span><b id="real-trading-status">Disabled until securely configured</b></div></article>
+          </div>
+          <div class="real-actions"><button class="secondary-button" type="button" disabled title="A verified payment provider has not been configured">Deposit</button><button class="secondary-button" type="button" disabled title="A verified payment provider has not been configured">Withdraw</button><span>Deposits and withdrawals are unavailable until a real payment provider, identity checks, and server-side transaction processing are configured.</span></div>
+          <div class="real-history-head"><div><h3>Real order history</h3><p>Only orders acknowledged by the trading backend appear here.</p></div></div>
+          <div id="real-activity-list" class="activity-list"><div class="empty-state compact-empty">No confirmed real orders yet.</div></div>
+          <p class="real-disclaimer">This panel does not create funds or simulate deposits. An order submission is not proof of a final fill; verify final execution and fees with the exchange.</p>
         </section>
         <section class="content-grid">
           <article class="panel markets-panel" id="markets-panel"><div class="panel-head"><div><h2>Market watch</h2><p>Popular assets · USD</p></div><label class="search-box"><span>⌕</span><input id="search" placeholder="Search assets..." autocomplete="off"/></label></div><div class="table-scroll"><table><thead><tr><th>ASSET</th><th>PRICE</th><th>24H CHANGE</th><th>MARKET CAP</th><th>7D TREND</th><th></th></tr></thead><tbody id="market-rows"><tr><td colspan="6" class="loading-cell">Loading market data…</td></tr></tbody></table></div><div class="table-footer"><span id="market-status">Connecting to public market data…</span><button class="text-button" id="refresh">↻ Refresh prices</button></div></article>
@@ -131,6 +144,19 @@ function renderPortfolio() {
   const activity = state.trades.slice(0,4);
   document.querySelector('#activity-list').innerHTML = activity.length ? activity.map(t=>`<div class="activity-row"><span class="activity-icon ${t.side}">${t.side==='buy'?'↙':'↗'}</span><div class="activity-title"><b>${t.side==='buy'?'Bought':'Sold'} ${t.symbol}</b><small>${t.time}</small></div><div class="activity-value"><b>${money(t.amount)}</b><small class="${t.side==='buy'?'positive-text':'negative-text'}">${t.side.toUpperCase()}</small></div></div>`).join('') : '<div class="empty-state compact-empty">No trades yet</div>';
 }
+function renderRealAccount() {
+  const connected=Boolean(window.__cTraderLive?.url);
+  const badge=document.querySelector('#real-account-status');
+  badge.textContent=connected?'BACKEND CONNECTED':'NOT CONNECTED';
+  badge.className=connected?'live-badge':'demo-badge';
+  document.querySelector('#real-balance-value').textContent='Not available';
+  document.querySelector('#real-balance-note').textContent=connected
+    ? 'The current API confirms connectivity but does not provide a verified balance for your individual exchange account.'
+    : 'Connect the API to begin setup. A verified balance requires a user-specific exchange connection.';
+  document.querySelector('#real-trading-status').textContent=connected?'Order API connected; balance verification unavailable':'Disabled until securely configured';
+  const list=document.querySelector('#real-activity-list');
+  list.innerHTML=state.realTrades.length?state.realTrades.slice(0,20).map(t=>'<div class="activity-row"><span class="activity-icon '+(t.side==='buy'?'buy':'sell')+'">'+(t.side==='buy'?'↙':'↗')+'</span><div class="activity-title"><b>'+(t.side==='buy'?'Buy':'Sell')+' '+escapeHtml(t.symbol)+'</b><small>Order '+escapeHtml(t.id)+' · '+escapeHtml(t.time)+'</small></div><div class="activity-value"><b>'+money(t.amount)+'</b><small>'+escapeHtml(String(t.status).toUpperCase())+'</small></div></div>').join(''):'<div class="empty-state compact-empty">No confirmed real orders yet.</div>';
+}
 function showToast(message) { const el=document.querySelector('#toast'); el.textContent=message; el.classList.add('visible'); setTimeout(()=>el.classList.remove('visible'),3000); }
 async function loadMarkets() {
   try {
@@ -163,8 +189,12 @@ function paperTrade() {
   renderPortfolio(); renderTrade(); if(state.user) syncWorkspaceToCloud().catch(()=>showToast('Trade saved locally; cloud sync failed.')); showToast(`Demo ${side} order complete · ${qty.toLocaleString('en-US',{maximumSignificantDigits:6})} ${m.symbol.toUpperCase()}`);
 }
 function switchTab(tab) {
+  const realAccount = tab === 'real-account';
   document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  document.querySelector('#crumb-current').textContent=({markets:'Markets',portfolio:'Portfolio',orders:'Trade history'})[tab]||'Markets';
+  document.querySelector('#crumb-current').textContent=({markets:'Markets',portfolio:'Portfolio',orders:'Trade history','real-account':'Real account'})[tab]||'Markets';
+  ['.welcome','.stats-grid','.content-grid','.bottom-grid'].forEach(selector=>{const el=document.querySelector(selector);if(el)el.hidden=realAccount;});
+  document.querySelector('#real-account-panel').hidden=!realAccount;
+  if(realAccount){renderRealAccount();document.querySelector('#real-account-panel').scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(tab==='portfolio') document.querySelector('#holdings-list').scrollIntoView({behavior:'smooth',block:'center'});
   if(tab==='orders') document.querySelector('#activity-list').scrollIntoView({behavior:'smooth',block:'center'});
   if(tab==='markets') document.querySelector('#markets-panel').scrollIntoView({behavior:'smooth',block:'start'});
@@ -177,6 +207,7 @@ function bindEvents() {
     const side=e.target.closest('[data-side]'); if(side){document.querySelectorAll('.side-btn').forEach(b=>b.classList.toggle('selected',b===side));renderTrade();}
   });
   document.querySelector('#account-button').addEventListener('click',()=>{updateAuthDialog();document.querySelector('#auth-dialog').showModal();});
+  document.querySelector('#real-connect').addEventListener('click',()=>{document.querySelector('#live-dialog').showModal();});
   document.querySelector('#auth-switch').addEventListener('click',()=>{authMode=authMode==='signin'?'signup':'signin';updateAuthDialog();});
   document.querySelector('#auth-form').addEventListener('submit',async e=>{
     if(e.submitter?.id!=='auth-submit')return;
@@ -231,7 +262,9 @@ async function liveTrade() {
   try {
     const r=await fetch(window.__cTraderLive.url+'/api/order',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+window.__cTraderLive.token},body:JSON.stringify({exchange:state.exchange,symbol:m.symbol.toUpperCase()+'/USDT',side,amount})});
     const data=await r.json();if(!r.ok)throw new Error(data.error||'Order rejected');
-    state.trades.unshift({side,symbol:m.symbol.toUpperCase(),amount,time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});renderPortfolio();showToast('Live order submitted. Check your exchange for final status.');
+    const order=data.order||{};
+    state.realTrades.unshift({id:order.id||'unassigned',side:order.side||side,symbol:(order.symbol||m.symbol.toUpperCase()+'/USDT').replace('/USDT',''),amount:Number(order.requestedUsd)||amount,status:order.status||'submitted',filled:order.filled,time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});
+    renderRealAccount();showToast('Backend acknowledged the live order. Verify final fill and fees at the exchange.');
   } catch(err){document.querySelector('#trade-error').textContent='Live order failed: '+err.message;}
 }
 let authMode='signin';
