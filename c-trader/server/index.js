@@ -33,7 +33,7 @@ function makeExchange(id) {
   const prefix=id.toUpperCase().replace(/[^A-Z0-9]/g,'_');
   const apiKey=process.env[`C_TRADER_${prefix}_API_KEY`]||'';
   const secret=process.env[`C_TRADER_${prefix}_SECRET`]||'';
-  const password=process.env[`C_TRADER_${prefix}_PASSWORD']||'';
+  const password=process.env[`C_TRADER_${prefix}_PASSWORD`]||'';
   if(!apiKey||!secret) throw new Error(`Server credentials are not configured for ${id}.`);
   return new Exchange({apiKey,secret,password:password||undefined,enableRateLimit:true,timeout:15000,options:{defaultType:'spot'}});
 }
