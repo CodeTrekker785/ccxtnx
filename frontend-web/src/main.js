@@ -182,7 +182,7 @@ function bindEvents() {
   document.querySelector('#connect-live').addEventListener('click',async e=>{
     e.preventDefault(); const url=document.querySelector('#api-url').value.trim().replace(/\/$/,''); const token=document.querySelector('#api-token').value.trim();
     if(!url||!token){showToast('Enter the backend URL and access token.');return;}
-    try {const r=await fetch(url+'/api/health',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new Error('Connection rejected');const data=await r.json();if(!data.ok)throw new Error('Backend not ready');window.__cTraderLive={url,token};state.mode='live';document.querySelector('#live-dialog').close();document.querySelector('#mode-label').textContent='Live trading';document.querySelector('#connection-label').textContent='Backend connected';renderTrade();showToast('Backend connected. Review live orders carefully.');}
+    try {const r=await fetch(url+'/api/health',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new Error('Connection rejected');const data=await r.json();if(!data.ok)throw new Error('Backend not ready');if(!data.liveTrading)throw new Error('Live trading is disabled or not securely configured on this backend');window.__cTraderLive={url,token};state.mode='live';document.querySelector('#live-dialog').close();document.querySelector('#mode-label').textContent='Live trading';document.querySelector('#connection-label').textContent='Backend connected';renderTrade();showToast('Backend connected. Review live orders carefully.');}
     catch(err){showToast('Could not verify backend. Check URL, token and CORS.');}
   });
 }
