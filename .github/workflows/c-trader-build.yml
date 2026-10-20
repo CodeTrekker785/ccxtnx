@@ -97,43 +97,27 @@ jobs:
           if "com.google.gms.google-services" not in root_text:
               if re.search(r"(?m)^plugins\s*\{", root_text):
                   root_text = re.sub(r"(?m)^(plugins\s*\{)", r"\1\n    " + plugin_line, root_text, count=1)
+              elif re.search(r"(?s)buildscript\s*\{", root_text):
+                  deps = re.search(r"(?s)dependencies\s*\{", root_text)
+                  if not deps:
+                      raise SystemExit("Root buildscript dependencies block not found")
+                  root_text = root_text[:deps.end()] + "\n        classpath 'com.google.gms:google-services:4.5.0'\n" + root_text[deps.end():]
               else:
-                  raise SystemExit("Root Gradle plugins block not found; refusing to guess the Gradle structure")
+                  raise SystemExit("Unsupported root Gradle structure; refusing to guess")
               root.write_text(root_text)
 
           app_text = app.read_text()
           if "com.google.firebase:firebase-bom" not in app_text:
-              dep_block = re.search(r"(?s)dependencies\s*\{", app_text)
-              if not dep_block:
+              deps = re.search(r"(?s)dependencies\s*\{", app_text)
+              if not deps:
                   raise SystemExit("App Gradle dependencies block not found")
-              additions = """
-              implementation platform('com.google.firebase:firebase-bom:35.0.2')
-              implementation 'com.google.firebase:firebase-auth'
-              implementation 'com.google.firebase:firebase-firestore'
-              """
-              app_text = app_text[:dep_block.end()] + additions + app_text[dep_block.end():]
+              additions = "\n    implementation platform('com.google.firebase:firebase-bom:35.0.2')\n    implementation 'com.google.firebase:firebase-auth'\n    implementation 'com.google.firebase:firebase-firestore'\n"
+              app_text = app_text[:deps.end()] + additions + app_text[deps.end():]
 
-          # Apply the Google Services plugin only when the real project config is supplied.
-          # This keeps CI/builds working without inventing Firebase project credentials.
-          if "com.google.gms.google-services" not in app_text:
-              marker = "apply plugin: 'com.android.application'"
-              if marker in app_text:
-                  app_text = app_text.replace(
-                      marker,
-                      marker + "\nif (file('google-services.json').exists()) {\n    apply plugin: 'com.google.gms.google-services'\n}",
-                      1
-                  )
-              else:
-                  plugins = re.search(r"(?m)^plugins\s*\{", app_text)
-                  if not plugins:
-                      raise SystemExit("App Gradle plugin declaration not found")
-                  app_text = re.sub(
-                      r"(?m)^(plugins\s*\{)",
-                      r"\1\n    id 'com.google.gms.google-services' apply false",
-                      app_text,
-                      count=1
-                  )
-                  app_text += "\nif (file('google-services.json').exists()) { apply plugin: 'com.google.gms.google-services' }\n"
+          # Do not invent a Firebase project config. The plugin is applied only after the
+          # user supplies the actual app/google-services.json from their Firebase project.
+          if "apply plugin: 'com.google.gms.google-services'" not in app_text:
+              app_text += "\nif (file('google-services.json').exists()) {\n    apply plugin: 'com.google.gms.google-services'\n}\n"
           app.write_text(app_text)
           PY
       - name: Sync web assets into Android
