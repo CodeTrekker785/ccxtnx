@@ -95,15 +95,15 @@ jobs:
           root_text = root.read_text()
           plugin_line = "id 'com.google.gms.google-services' version '4.5.0' apply false"
           if "com.google.gms.google-services" not in root_text:
-              if re.search(r"(?m)^plugins\\s*\\{", root_text):
-                  root_text = re.sub(r"(?m)^(plugins\\s*\\{)", r"\\1\\n    " + plugin_line, root_text, count=1)
+              if re.search(r"(?m)^plugins\s*\{", root_text):
+                  root_text = re.sub(r"(?m)^(plugins\s*\{)", r"\1\n    " + plugin_line, root_text, count=1)
               else:
                   raise SystemExit("Root Gradle plugins block not found; refusing to guess the Gradle structure")
               root.write_text(root_text)
 
           app_text = app.read_text()
           if "com.google.firebase:firebase-bom" not in app_text:
-              dep_block = re.search(r"(?s)dependencies\\s*\\{", app_text)
+              dep_block = re.search(r"(?s)dependencies\s*\{", app_text)
               if not dep_block:
                   raise SystemExit("App Gradle dependencies block not found")
               additions = """
@@ -120,20 +120,20 @@ jobs:
               if marker in app_text:
                   app_text = app_text.replace(
                       marker,
-                      marker + "\\nif (file('google-services.json').exists()) {\\n    apply plugin: 'com.google.gms.google-services'\\n}",
+                      marker + "\nif (file('google-services.json').exists()) {\n    apply plugin: 'com.google.gms.google-services'\n}",
                       1
                   )
               else:
-                  plugins = re.search(r"(?m)^plugins\\s*\\{", app_text)
+                  plugins = re.search(r"(?m)^plugins\s*\{", app_text)
                   if not plugins:
                       raise SystemExit("App Gradle plugin declaration not found")
                   app_text = re.sub(
-                      r"(?m)^(plugins\\s*\\{)",
-                      r"\\1\\n    id 'com.google.gms.google-services' apply false",
+                      r"(?m)^(plugins\s*\{)",
+                      r"\1\n    id 'com.google.gms.google-services' apply false",
                       app_text,
                       count=1
                   )
-                  app_text += "\\nif (file('google-services.json').exists()) { apply plugin: 'com.google.gms.google-services' }\\n"
+                  app_text += "\nif (file('google-services.json').exists()) { apply plugin: 'com.google.gms.google-services' }\n"
           app.write_text(app_text)
           PY
       - name: Sync web assets into Android
