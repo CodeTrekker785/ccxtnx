@@ -160,7 +160,7 @@ function paperTrade() {
     state.holdings[m.id]-=qty; state.balance+=amount-fee;
   }
   state.trades.unshift({side,symbol:m.symbol.toUpperCase(),amount,time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});
-  renderPortfolio(); renderTrade(); showToast(`Demo ${side} order complete · ${qty.toLocaleString('en-US',{maximumSignificantDigits:6})} ${m.symbol.toUpperCase()}`);
+  renderPortfolio(); renderTrade(); if(state.user) syncWorkspaceToCloud().catch(()=>showToast('Trade saved locally; cloud sync failed.')); showToast(`Demo ${side} order complete · ${qty.toLocaleString('en-US',{maximumSignificantDigits:6})} ${m.symbol.toUpperCase()}`);
 }
 function switchTab(tab) {
   document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
