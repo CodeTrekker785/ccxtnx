@@ -1,4 +1,5 @@
 import './style.css';
+import { firebaseReady, onUserChanged, signIn, signUp, signOutUser, saveUserWorkspace, loadUserWorkspace } from './services/firebase.js';
 
 const state = {
   mode: 'demo',
@@ -13,6 +14,8 @@ const state = {
   trades: [],
   lastUpdated: null,
   loading: true,
+  user: null,
+  authReady: false,
 };
 const symbols = {
   bitcoin: ['BTC', 'Bitcoin', '₿'],
@@ -53,7 +56,7 @@ function appShell() {
       <div class="side-bottom"><div class="secure-icon">⌁</div><strong>Trade with care</strong><p>Crypto assets are volatile. Review every order before confirming.</p><span class="build-label">C TRADER · v1.0</span></div>
     </aside>
     <main class="main">
-      <header class="topbar"><div class="mobile-brand"><span class="brand-mark">C</span> C Trader</div><div class="crumb">Workspace <span>/</span> <b id="crumb-current">Markets</b></div><div class="top-actions"><span class="connection"><i></i> <span id="connection-label">Public market data</span></span><button class="mode-toggle" id="mode-toggle"><span class="mode-dot"></span><span id="mode-label">Demo trading</span><span class="chevron">⌄</span></button><button class="avatar" title="C Trader">CT</button></div></header>
+      <header class="topbar"><div class="mobile-brand"><span class="brand-mark">C</span> C Trader</div><div class="crumb">Workspace <span>/</span> <b id="crumb-current">Markets</b></div><div class="top-actions"><span class="connection"><i></i> <span id="connection-label">Public market data</span></span><button class="mode-toggle" id="mode-toggle"><span class="mode-dot"></span><span id="mode-label">Demo trading</span><span class="chevron">⌄</span></button><button class="avatar" id="account-button" title="Sign in or manage account">CT</button></div></header>
       <div class="page">
         <section class="welcome"><div><div class="eyebrow"><span class="live-pip"></span> MARKET OVERVIEW</div><h1>Trade smarter.<br/><span>See the whole market.</span></h1><p>Track crypto markets across your favorite exchanges in one workspace.</p></div><div class="welcome-art"><div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="coin coin-back">Ξ</div><div class="coin coin-front">₿</div><div class="art-spark">✦</div></div></section>
         <section class="stats-grid">
@@ -70,6 +73,7 @@ function appShell() {
       </div>
     </main>
     <div class="toast" id="toast" role="status"></div>
+    <dialog id="auth-dialog"><form method="dialog" class="dialog-card" id="auth-form"><button class="dialog-close" value="cancel" aria-label="Close">×</button><div class="dialog-icon">◉</div><div class="eyebrow">C TRADER ACCOUNT</div><h2 id="auth-title">Sign in</h2><p id="auth-copy">Sign in to sync your demo portfolio and trade history across devices.</p><label class="field-label" for="auth-email">Email</label><input id="auth-email" class="dialog-input" type="email" autocomplete="email" required placeholder="you@example.com"/><label class="field-label" for="auth-password">Password</label><input id="auth-password" class="dialog-input" type="password" autocomplete="current-password" minlength="6" required placeholder="At least 6 characters"/><div class="dialog-actions"><button class="secondary-button" type="button" id="auth-switch">Create account</button><button class="primary-button" id="auth-submit" value="submit">Sign in</button></div><button class="text-button" type="button" id="auth-signout" hidden>Sign out</button><p class="dialog-hint" id="auth-status">Firebase configuration is required. Authentication is unavailable until configured.</p></form></dialog>
     <dialog id="live-dialog"><form method="dialog" class="dialog-card"><button class="dialog-close" value="cancel" aria-label="Close">×</button><div class="dialog-icon">⌁</div><div class="eyebrow">LIVE TRADING</div><h2>Connect your secure backend</h2><p>Real orders require a separately deployed C Trader API server, exchange API credentials stored on that server, and a private access token. Never paste exchange secret keys into this app.</p><label class="field-label" for="api-url">Backend URL</label><input id="api-url" class="dialog-input" type="url" placeholder="https://your-api.example.com" autocomplete="url"/><label class="field-label" for="api-token">Backend access token</label><input id="api-token" class="dialog-input" type="password" placeholder="Session-only token" autocomplete="off"/><div class="dialog-actions"><button class="secondary-button" value="cancel">Cancel</button><button class="primary-button" id="connect-live" value="connect">Test connection</button></div><p class="dialog-hint">Token remains in memory for this session only. Configure C_TRADER_ACCESS_TOKEN and exchange credentials on the backend.</p></form></dialog>
   `;
 }
@@ -172,6 +176,20 @@ function bindEvents() {
     const row=e.target.closest('tr[data-asset]'); if(row){state.selected=row.dataset.asset;renderMarkets();renderTrade();}
     const side=e.target.closest('[data-side]'); if(side){document.querySelectorAll('.side-btn').forEach(b=>b.classList.toggle('selected',b===side));renderTrade();}
   });
+  document.querySelector('#account-button').addEventListener('click',()=>{updateAuthDialog();document.querySelector('#auth-dialog').showModal();});
+  document.querySelector('#auth-switch').addEventListener('click',()=>{authMode=authMode==='signin'?'signup':'signin';updateAuthDialog();});
+  document.querySelector('#auth-form').addEventListener('submit',async e=>{
+    if(e.submitter?.id!=='auth-submit')return;
+    e.preventDefault();
+    if(!firebaseReady){document.querySelector('#auth-status').textContent='Add Firebase web configuration to frontend-web/.env (see .env.example) and rebuild.';return;}
+    const email=document.querySelector('#auth-email').value.trim(), password=document.querySelector('#auth-password').value;
+    const button=document.querySelector('#auth-submit');button.disabled=true;
+    try{
+      const user=authMode==='signup'?await signUp(email,password):await signIn(email,password);
+      state.user={uid:user.uid,email:user.email}; await syncWorkspaceToCloud(); document.querySelector('#auth-dialog').close();showToast('Signed in. Demo workspace sync enabled.');
+    }catch(err){document.querySelector('#auth-status').textContent=authMessage(err);}
+    finally{button.disabled=false;}
+  });
   document.querySelector('#search').addEventListener('input',e=>{state.query=e.target.value;renderMarkets();});
   document.querySelector('#amount').addEventListener('input',updateEstimate);
   document.querySelector('#exchange').addEventListener('change',e=>{state.exchange=e.target.value;document.querySelector('#trade-exchange').textContent=exchangeName();showToast(`Selected ${exchangeName()} connector`);});
@@ -216,4 +234,31 @@ async function liveTrade() {
     state.trades.unshift({side,symbol:m.symbol.toUpperCase(),amount,time:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});renderPortfolio();showToast('Live order submitted. Check your exchange for final status.');
   } catch(err){document.querySelector('#trade-error').textContent='Live order failed: '+err.message;}
 }
+let authMode='signin';
+function updateAuthDialog(){
+  const signed=Boolean(state.user);
+  document.querySelector('#auth-title').textContent=signed?'Your account':authMode==='signup'?'Create account':'Sign in';
+  document.querySelector('#auth-copy').textContent=signed?state.user.email:'Sign in to sync your demo portfolio and trade history across devices.';
+  document.querySelector('#auth-submit').textContent=authMode==='signup'?'Create account':'Sign in';
+  document.querySelector('#auth-switch').textContent=authMode==='signup'?'I already have an account':'Create account';
+  document.querySelector('#auth-signout').hidden=!signed;
+  document.querySelector('#auth-email').hidden=signed;
+  document.querySelector('#auth-password').hidden=signed;
+  document.querySelector('#auth-submit').hidden=signed;
+  document.querySelector('#auth-switch').hidden=signed;
+  document.querySelector('#auth-status').textContent=!firebaseReady?'Firebase configuration is required. See frontend-web/.env.example.':signed?'Your demo workspace syncs to your Firebase account.':'Firebase Authentication is ready.';
+}
+function authMessage(err){return ({'auth/invalid-credential':'Email or password is incorrect.','auth/email-already-in-use':'An account with this email already exists.','auth/weak-password':'Choose a password with at least 6 characters.','auth/invalid-email':'Enter a valid email address.','auth/too-many-requests':'Too many attempts. Try again later.'})[err.code]||err.message||'Authentication failed.';}
+async function syncWorkspaceToCloud(){
+  if(!state.user)return;
+  await saveUserWorkspace(state.user.uid,{balance:state.balance,initialBalance:state.initialBalance,holdings:state.holdings,trades:state.trades,mode:'demo',updatedAt:new Date().toISOString()});
+}
 appShell(); bindEvents(); state.markets=fallbackMarkets; renderMarkets(); renderTrade(); renderPortfolio(); loadMarkets(); setInterval(loadMarkets,60000); setInterval(refreshSelectedExchangeTicker,10000);
+onUserChanged(async user=>{
+  state.user=user?{uid:user.uid,email:user.email}:null;
+  document.querySelector('#account-button').textContent=user?(user.email||'CT').slice(0,2).toUpperCase():'CT';
+  updateAuthDialog();
+  if(user){try{const data=await loadUserWorkspace(user.uid);if(data){state.balance=Number(data.balance)||state.balance;state.initialBalance=Number(data.initialBalance)||state.initialBalance;state.holdings=data.holdings&&typeof data.holdings==='object'?data.holdings:{};state.trades=Array.isArray(data.trades)?data.trades:[];renderPortfolio();renderTrade();}}catch{showToast('Could not sync workspace. Check Firestore security rules.');}}
+});
+document.querySelector('#auth-signout').addEventListener('click',async()=>{await signOutUser();state.user=null;updateAuthDialog();document.querySelector('#auth-dialog').close();showToast('Signed out.');});
+
