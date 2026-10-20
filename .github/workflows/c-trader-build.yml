@@ -80,6 +80,62 @@ jobs:
       - name: Generate Android project
         working-directory: mobile-app
         run: npx cap add android
+      - name: Configure native Firebase Gradle dependencies
+        working-directory: mobile-app/android
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("build.gradle")
+          app = Path("app/build.gradle")
+          if not root.exists() or not app.exists():
+              raise SystemExit("Expected Capacitor-generated Groovy Gradle files were not found")
+
+          root_text = root.read_text()
+          plugin_line = "id 'com.google.gms.google-services' version '4.5.0' apply false"
+          if "com.google.gms.google-services" not in root_text:
+              if re.search(r"(?m)^plugins\\s*\\{", root_text):
+                  root_text = re.sub(r"(?m)^(plugins\\s*\\{)", r"\\1\\n    " + plugin_line, root_text, count=1)
+              else:
+                  raise SystemExit("Root Gradle plugins block not found; refusing to guess the Gradle structure")
+              root.write_text(root_text)
+
+          app_text = app.read_text()
+          if "com.google.firebase:firebase-bom" not in app_text:
+              dep_block = re.search(r"(?s)dependencies\\s*\\{", app_text)
+              if not dep_block:
+                  raise SystemExit("App Gradle dependencies block not found")
+              additions = """
+              implementation platform('com.google.firebase:firebase-bom:35.0.2')
+              implementation 'com.google.firebase:firebase-auth'
+              implementation 'com.google.firebase:firebase-firestore'
+              """
+              app_text = app_text[:dep_block.end()] + additions + app_text[dep_block.end():]
+
+          # Apply the Google Services plugin only when the real project config is supplied.
+          # This keeps CI/builds working without inventing Firebase project credentials.
+          if "com.google.gms.google-services" not in app_text:
+              marker = "apply plugin: 'com.android.application'"
+              if marker in app_text:
+                  app_text = app_text.replace(
+                      marker,
+                      marker + "\\nif (file('google-services.json').exists()) {\\n    apply plugin: 'com.google.gms.google-services'\\n}",
+                      1
+                  )
+              else:
+                  plugins = re.search(r"(?m)^plugins\\s*\\{", app_text)
+                  if not plugins:
+                      raise SystemExit("App Gradle plugin declaration not found")
+                  app_text = re.sub(
+                      r"(?m)^(plugins\\s*\\{)",
+                      r"\\1\\n    id 'com.google.gms.google-services' apply false",
+                      app_text,
+                      count=1
+                  )
+                  app_text += "\\nif (file('google-services.json').exists()) { apply plugin: 'com.google.gms.google-services' }\\n"
+          app.write_text(app_text)
+          PY
       - name: Sync web assets into Android
         working-directory: mobile-app
         run: npx cap sync android
